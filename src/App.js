@@ -53,9 +53,10 @@ export default function InvestmentTracker() {
 
         setData({
           positions: positions.map((p, idx) => ({
-            id: p.포지션ID || idx + 1,
+            id: p.포지션ID || `${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${idx + 1}`,
             ticker: p.종목코드 || '',
             name: p.종목명 || '',
+            sector: p.섹터 || 'N/A',  // 섹터 추가!
             strategy: p.전략 || '',
             entryDate: formatDate(p.진입일),
             entryPrice: p.진입가 || 0,
@@ -121,9 +122,9 @@ export default function InvestmentTracker() {
 
     // 포지션 목록 시트
     const positionData = [
-      ['포지션ID', '종목코드', '종목명', '전략', '진입일', '진입가', '수량', '투자금', '목표가', '손절가', '계획보유일', '청산예정일', '예상수익률', '백테스트승률', '진입사유', '상태', '현재가'],
-      [1, '000660', 'SK하이닉스', '추세추종', '2026-01-02', 677000, 10, 6770000, 715000, 452000, 20, '2026-01-27', 5.61, 63.6, '스캔 결과 상위', '보유중', 677000],
-      [2, '005930', '삼성전자', '변동성돌파', '2026-01-03', 50000, 40, 2000000, 53900, 40600, 5, '2026-01-10', 7.8, 84.2, '강한 시그널', '보유중', 50000]
+      ['포지션ID', '종목코드', '종목명', '섹터', '전략', '진입일', '진입가', '수량', '투자금', '목표가', '손절가', '계획보유일', '청산예정일', '예상수익률', '백테스트승률', '진입사유', '상태', '현재가'],
+      ['20260102-001', '000660', 'SK하이닉스', '반도체', '추세추종', '2026-01-02', 677000, 10, 6770000, 715000, 452000, 20, '2026-01-27', 5.6, 64, '스캔 결과 상위', '보유중', 677000],
+      ['20260102-002', '005930', '삼성전자', '전자', '변동성돌파', '2026-01-03', 50000, 40, 2000000, 53900, 40600, 5, '2026-01-10', 7.8, 84, '강한 시그널', '보유중', 50000]
     ];
     const wsPosition = XLSX.utils.aoa_to_sheet(positionData);
     XLSX.utils.book_append_sheet(wb, wsPosition, '포지션목록');
@@ -155,6 +156,7 @@ export default function InvestmentTracker() {
       '포지션ID': p.id,
       '종목코드': p.ticker,
       '종목명': p.name,
+      '섹터': p.sector || 'N/A',
       '전략': p.strategy,
       '진입일': p.entryDate,
       '진입가': p.entryPrice,
@@ -177,35 +179,35 @@ export default function InvestmentTracker() {
     data.positions.forEach((p, idx) => {
       const row = idx + 2; // 헤더 제외
       
-      // H열: 투자금 = F × G (진입가 × 수량)
-      wsPosition[`H${row}`] = { 
+      // I열: 투자금 = G × H (진입가 × 수량)
+      wsPosition[`I${row}`] = { 
         t: 'n',
-        f: `F${row}*G${row}`,
+        f: `G${row}*H${row}`,
         v: p.investment
       };
       
-      // I열: 목표가 = F × (1 + M/100) (진입가 × (1 + 예상수익률/100))
-      wsPosition[`I${row}`] = {
+      // J열: 목표가 = G × (1 + N/100) (진입가 × (1 + 예상수익률/100))
+      wsPosition[`J${row}`] = {
         t: 'n',
-        f: `F${row}*(1+M${row}/100)`,
+        f: `ROUND(G${row}*(1+N${row}/100),0)`,
         v: p.targetPrice
       };
       
-      // J열: 손절가 = 진입가 × (1 + 손실률/100)
+      // K열: 손절가 = 진입가 × (1 + 손실률/100)
       // 손실률은 고정값으로 계산 (백테스트 최대손실 사용)
       const lossRate = p.stopPrice > 0 ? ((p.stopPrice / p.entryPrice - 1) * 100).toFixed(2) : -10;
-      wsPosition[`J${row}`] = {
+      wsPosition[`K${row}`] = {
         t: 'n',
-        f: `F${row}*(1+${lossRate}/100)`,
+        f: `ROUND(G${row}*(1+${lossRate}/100),0)`,
         v: p.stopPrice
       };
       
-      // L열: 청산예정일 = E + K (진입일 + 계획보유일)
-      // Excel 날짜 수식
+      // M열: 청산예정일 = F + ROUND(L*1.4,0) (진입일 + 계획보유일×1.4)
+      // Excel 날짜 수식 (주말 포함)
       if (p.entryDate && p.plannedDays) {
-        wsPosition[`L${row}`] = {
+        wsPosition[`M${row}`] = {
           t: 'd',
-          f: `E${row}+K${row}`,
+          f: `F${row}+ROUND(L${row}*1.4,0)`,
           v: p.plannedExitDate
         };
       }
@@ -686,7 +688,10 @@ export default function InvestmentTracker() {
                       <div className="flex justify-between items-start mb-4">
                         <div>
                           <h3 className="text-lg font-bold text-gray-800">{position.name} ({position.ticker})</h3>
-                          <p className="text-sm text-gray-600">{position.strategy} | 진입: {position.entryDate}</p>
+                          <p className="text-sm text-gray-600">
+                            {position.sector && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs mr-2">{position.sector}</span>}
+                            {position.strategy} | 진입: {position.entryDate}
+                          </p>
                         </div>
                         <div className="text-right">
                           {dday !== null && (
