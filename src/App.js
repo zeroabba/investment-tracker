@@ -41,8 +41,10 @@ export default function InvestmentTracker() {
       try {
         const workbook = XLSX.read(event.target.result, { type: 'binary' });
         
-        // 포지션 목록 읽기
-        const positionsSheet = workbook.Sheets['포지션목록'] || {};
+        // 포지션 목록 읽기 (Scanner의 "포지션목록_템플릿"도 지원!)
+        const positionsSheet = workbook.Sheets['포지션목록_템플릿'] || 
+                               workbook.Sheets['포지션목록'] || 
+                               {};
         const positions = XLSX.utils.sheet_to_json(positionsSheet);
 
         // 청산 기록 읽기
@@ -137,7 +139,7 @@ export default function InvestmentTracker() {
     XLSX.writeFile(wb, 'CALM_투자일지_템플릿.xlsx');
   };
 
-  // 엑셀 내보내기
+  // 엑셀 내보내기 (수식 포함!)
   const exportToExcel = () => {
     if (data.positions.length === 0 && data.closed.length === 0) {
       alert('먼저 데이터를 입력하거나 불러오세요.');
@@ -146,7 +148,9 @@ export default function InvestmentTracker() {
 
     const wb = XLSX.utils.book_new();
 
-    // 포지션 목록
+    // ========================================
+    // 포지션 목록 (수식 포함!)
+    // ========================================
     const positionExport = data.positions.map(p => ({
       '포지션ID': p.id,
       '종목코드': p.ticker,
@@ -166,10 +170,52 @@ export default function InvestmentTracker() {
       '상태': p.status,
       '현재가': p.currentPrice
     }));
+    
     const wsPosition = XLSX.utils.json_to_sheet(positionExport);
+    
+    // 수식 추가!
+    data.positions.forEach((p, idx) => {
+      const row = idx + 2; // 헤더 제외
+      
+      // H열: 투자금 = F × G (진입가 × 수량)
+      wsPosition[`H${row}`] = { 
+        t: 'n',
+        f: `F${row}*G${row}`,
+        v: p.investment
+      };
+      
+      // I열: 목표가 = F × (1 + M/100) (진입가 × (1 + 예상수익률/100))
+      wsPosition[`I${row}`] = {
+        t: 'n',
+        f: `F${row}*(1+M${row}/100)`,
+        v: p.targetPrice
+      };
+      
+      // J열: 손절가 = 진입가 × (1 + 손실률/100)
+      // 손실률은 고정값으로 계산 (백테스트 최대손실 사용)
+      const lossRate = p.stopPrice > 0 ? ((p.stopPrice / p.entryPrice - 1) * 100).toFixed(2) : -10;
+      wsPosition[`J${row}`] = {
+        t: 'n',
+        f: `F${row}*(1+${lossRate}/100)`,
+        v: p.stopPrice
+      };
+      
+      // L열: 청산예정일 = E + K (진입일 + 계획보유일)
+      // Excel 날짜 수식
+      if (p.entryDate && p.plannedDays) {
+        wsPosition[`L${row}`] = {
+          t: 'd',
+          f: `E${row}+K${row}`,
+          v: p.plannedExitDate
+        };
+      }
+    });
+    
     XLSX.utils.book_append_sheet(wb, wsPosition, '포지션목록');
 
+    // ========================================
     // 청산 기록
+    // ========================================
     const closedExport = data.closed.map(c => ({
       '포지션ID': c.id,
       '종목코드': c.ticker,
